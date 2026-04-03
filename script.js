@@ -9,24 +9,59 @@ let isInvincible = false;
 let powerUpStack = []; 
 let defenseUp = 0; 
 let deaths = 0;
+let bossDefeated = false; // Trava para o boss não spawnar infinitamente após morrer
 
 function init() {
-    w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight;
+    w = canvas.width = window.innerWidth; 
+    h = canvas.height = window.innerHeight;
     shipPos = { x: w/2, y: h - 120 };
     stars = Array.from({length: 150}, () => ({ x: Math.random()*w, y: Math.random()*h, s: Math.random()*2+1 }));
 }
 
-function resetGame() {
-    score = 0; playerHP = 100; deaths = 0;
-    sideShips = 0; fireDelay = 250; defenseUp = 0;
-    enemies = []; bullets = []; enemyBullets = []; powerups = []; 
-    powerUpStack = []; boss = null; isInvincible = false;
-    shipPos = { x: w/2, y: h - 120 };
-    const endScreen = document.querySelector('.end-screen');
-    if(endScreen) endScreen.remove();
-    updateScore(); updateHUD();
-    gameActive = true;
-    requestAnimationFrame(update);
+function updateScore() {
+    const scoreEl = document.getElementById('val');
+    if(scoreEl) scoreEl.innerText = score;
+}
+
+function updateHUD() {
+    const hpFill = document.getElementById('hp-fill');
+    const livesVal = document.getElementById('lives-val');
+    if(hpFill) hpFill.style.width = playerHP + "%";
+    if(livesVal) livesVal.innerText = (5 - deaths);
+}
+
+function takeDamage(amount) {
+    if (isInvincible) return;
+    playerHP -= (defenseUp > 0 ? amount / 2 : amount);
+    updateHUD();
+    if (playerHP <= 0) respawnPlayer();
+}
+
+function respawnPlayer() {
+    deaths++;
+    if (deaths >= 5) { endGame(false); return; }
+    playerHP = 100;
+    defenseUp = 0; 
+    if (powerUpStack.length > 0) {
+        let lost = powerUpStack.pop();
+        if (lost === 's') sideShips = Math.max(0, sideShips - 1);
+        if (lost === 'f') fireDelay = Math.min(250, fireDelay + 40);
+    }
+    enemies = []; enemyBullets = []; isInvincible = true;
+    setTimeout(() => { isInvincible = false; }, 3000);
+    updateHUD();
+}
+
+function endGame(victory) {
+    gameActive = false;
+    const screen = document.createElement('div');
+    screen.className = 'end-screen';
+    screen.innerHTML = `
+        <h1 style="color:${victory ? '#00f2ff' : '#ff0055'}">${victory ? 'MISSÃO CONCLUÍDA' : 'GAME OVER'}</h1>
+        <p>SCORE FINAL: ${score}</p>
+        <button onclick="location.reload()" style="background:none; border:2px solid #fff; color:#fff; padding:15px 30px; cursor:pointer; font-family: 'Syncopate', sans-serif;">JOGAR NOVAMENTE</button>
+    `;
+    document.body.appendChild(screen);
 }
 
 function drawPlayerShip(x, y, size = 35) {
@@ -58,53 +93,42 @@ function drawBossShip(x, y) {
     ctx.restore();
 }
 
-function takeDamage(amount) {
-    if (isInvincible) return;
-    playerHP -= (defenseUp > 0 ? amount / 2 : amount);
-    updateHUD();
-    if (playerHP <= 0) respawnPlayer();
-}
-
-function respawnPlayer() {
-    deaths++;
-    if (deaths >= 5) { endGame(false); return; }
-    playerHP = 100;
-    defenseUp = 0; 
-    if (powerUpStack.length > 0) {
-        let lost = powerUpStack.pop();
-        if (lost === 's') sideShips = Math.max(0, sideShips - 1);
-        if (lost === 'f') fireDelay = Math.min(250, fireDelay + 40);
-    }
-    enemies = []; enemyBullets = []; isInvincible = true;
-    setTimeout(() => { isInvincible = false; }, 3000);
-    updateHUD();
-}
-
 function startLoop() {
     gameActive = true;
     document.getElementById('main-ui').style.display = 'none';
+    
+    // UI MOBILE: Botões maiores e fogo na direita
     document.getElementById('game-container').innerHTML = `
         <div class="hud-container">
             <div class="health-bar-bg"><div id="hp-fill" class="health-bar-fill"></div></div>
             <div id="lives-ui" style="font-size:10px;margin-top:5px;color:#00f2ff">VIDAS: <span id="lives-val">5</span></div>
         </div>
         <div id="score-ui">SCORE: <span id="val">0</span></div>
+        
         <div class="controls-overlay">
-            <div class="btn-ctrl" id="up" style="grid-area:up">▲</div><div class="btn-ctrl" id="left" style="grid-area:left">◀</div>
-            <div class="btn-ctrl" id="down" style="grid-area:down">▼</div><div class="btn-ctrl" id="right" style="grid-area:right">▶</div>
-            <div class="btn-ctrl btn-space" id="fire">SPACE</div>
+            <div class="btn-ctrl" id="up" style="grid-area:up">▲</div>
+            <div class="btn-ctrl" id="left" style="grid-area:left">◀</div>
+            <div class="btn-ctrl" id="down" style="grid-area:down">▼</div>
+            <div class="btn-ctrl" id="right" style="grid-area:right">▶</div>
+        </div>
+
+        <div id="fire-container" style="position:fixed; bottom:40px; right:30px; z-index:2000;">
+            <div class="btn-ctrl btn-space" id="fire">FIRE</div>
         </div>`;
     
     window.addEventListener('keydown', e => keys[e.code] = true);
     window.addEventListener('keyup', e => keys[e.code] = false);
+
     const setupBtn = (id, code) => {
         const el = document.getElementById(id);
         if(!el) return;
-        el.onmousedown = el.ontouchstart = () => keys[code] = true;
-        el.onmouseup = el.ontouchend = () => keys[code] = false;
+        el.onmousedown = el.ontouchstart = (e) => { e.preventDefault(); keys[code] = true; };
+        el.onmouseup = el.ontouchend = (e) => { e.preventDefault(); keys[code] = false; };
     };
+
     ['up','down','left','right'].forEach(id => setupBtn(id, 'Arrow'+id.charAt(0).toUpperCase()+id.slice(1)));
     setupBtn('fire', 'Space');
+    
     requestAnimationFrame(update);
 }
 
@@ -113,6 +137,7 @@ function update() {
     ctx.fillStyle = "#000"; ctx.fillRect(0,0,w,h);
     stars.forEach(s => { s.y += 6; if(s.y > h) s.y = 0; ctx.fillStyle = "#fff"; ctx.fillRect(s.x, s.y, s.s, s.s); });
 
+    // Movimentação Jogador
     if(keys['ArrowUp'] && shipPos.y > 50) shipPos.y -= 7;
     if(keys['ArrowDown'] && shipPos.y < h - 50) shipPos.y += 7;
     if(keys['ArrowLeft'] && shipPos.x > 40) shipPos.x -= 7;
@@ -122,6 +147,7 @@ function update() {
     if(sideShips >= 1) drawPlayerShip(shipPos.x - 45, shipPos.y + 25, 20);
     if(sideShips >= 2) drawPlayerShip(shipPos.x + 45, shipPos.y + 25, 20);
 
+    // Sistema de Tiro
     if(keys['Space'] && Date.now() - lastFire > fireDelay) {
         bullets.push({x: shipPos.x, y: shipPos.y - 30});
         if(sideShips >= 1) bullets.push({x: shipPos.x - 45, y: shipPos.y});
@@ -144,12 +170,14 @@ function update() {
         if(eb.y > h || eb.x < 0 || eb.x > w) enemyBullets.splice(i, 1);
     });
 
+    // Inimigos Comuns
     if(score < 5000 && !boss && Math.random() < 0.025) enemies.push({x: Math.random()*(w-60)+30, y: -50, lastShot: 0, id: Date.now() + Math.random()});
+    
     enemies.forEach((e, i) => {
         e.y += 3.5;
         ctx.save(); ctx.translate(e.x, e.y); ctx.fillStyle = "#ff4444"; ctx.beginPath(); ctx.moveTo(0, 20); ctx.lineTo(-15, -10); ctx.lineTo(-5, -5); ctx.lineTo(0, -15); ctx.lineTo(5, -5); ctx.lineTo(15, -10); ctx.fill(); ctx.restore();
         if(Date.now() - e.lastShot > 1500) { enemyBullets.push({x: e.x, y: e.y + 20, ownerId: e.id}); e.lastShot = Date.now(); }
-        if(Math.hypot(e.x - shipPos.x, e.y - shipPos.y) < 40) { takeDamage(20); enemies.splice(i, 1); enemyBullets = enemyBullets.filter(eb => eb.ownerId !== e.id); }
+        if(Math.hypot(e.x - shipPos.x, e.y - shipPos.y) < 40) { takeDamage(20); enemies.splice(i, 1); }
         bullets.forEach((b, bi) => {
             if(Math.hypot(e.x - b.x, e.y - b.y) < 30) {
                 if(Math.random() < 0.15) {
@@ -157,64 +185,58 @@ function update() {
                     powerups.push({x: e.x, y: e.y, t: r > 0.66 ? 's' : (r > 0.33 ? 'f' : 'd')});
                 }
                 score += 100; updateScore();
-                enemyBullets = enemyBullets.filter(eb => eb.ownerId !== e.id);
                 enemies.splice(i, 1); bullets.splice(bi, 1);
             }
         });
         if(e.y > h) enemies.splice(i, 1);
     });
 
-    if(score >= 5000 && !boss) boss = { x: w/2, y: -150, hp: 250, mHp: 250, d: 1, lastShot: 0, id: 'BOSS' };
+    // Lógica do Boss - COM CORREÇÃO DE LOOP INFINITO
+    if(score >= 5000 && !boss && !bossDefeated) boss = { x: w/2, y: -150, hp: 250, mHp: 250, d: 1, lastShot: 0 };
+    
     if(boss) {
         boss.y = Math.min(boss.y + 1, 120); boss.x += boss.d * 3;
         if(boss.x > w - 150 || boss.x < 150) boss.d *= -1;
         drawBossShip(boss.x, boss.y);
+        
         ctx.fillStyle = "#333"; ctx.fillRect(boss.x - 50, boss.y - 80, 100, 6);
-        ctx.fillStyle = "#ff0055"; ctx.fillRect(boss.x - 50, boss.y - 80, (boss.hp/boss.mHp)*100, 6);
-        if(Date.now() - boss.lastShot > 600) { 
-            for(let j = -2; j <= 2; j++) {
-                enemyBullets.push({ x: boss.x + (j * 20), y: boss.y + 40, vx: j * 2, vy: 6, ownerId: 'BOSS' });
-            }
-            boss.lastShot = Date.now(); 
+        ctx.fillStyle = "#ff0055"; ctx.fillRect(boss.x - 50, boss.y - 80, (boss.hp / boss.mHp) * 100, 6);
+
+        if(Date.now() - boss.lastShot > 1000) {
+            [-2, 0, 2].forEach(vx => enemyBullets.push({x: boss.x, y: boss.y + 40, vx: vx, vy: 5}));
+            boss.lastShot = Date.now();
         }
+
         bullets.forEach((b, bi) => {
-            if(b.x > boss.x-100 && b.x < boss.x+100 && b.y < boss.y + 50 && b.y > boss.y - 50) {
-                boss.hp -= 2; bullets.splice(bi, 1); 
-                if(boss.hp <= 0) { enemyBullets = enemyBullets.filter(eb => eb.ownerId !== 'BOSS'); endGame(true); }
+            if(Math.hypot(boss.x - b.x, boss.y - b.y) < 60) {
+                boss.hp -= 5; bullets.splice(bi, 1);
+                if(boss.hp <= 0) { 
+                    score += 5000; 
+                    boss = null; 
+                    bossDefeated = true; // Trava o spawn
+                    updateScore(); 
+                    endGame(true); // ZERA O JOGO
+                }
             }
         });
     }
 
+    // Power-ups
     powerups.forEach((p, i) => {
-        p.y += 2; ctx.fillStyle = p.t === 's' ? "#00ffaa" : (p.t === 'f' ? "#ffff00" : "#0055ff");
-        ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.fillText(p.t.toUpperCase(), p.x-4, p.y+4);
+        p.y += 3;
+        ctx.fillStyle = p.t === 's' ? "#00ff00" : (p.t === 'f' ? "#ffff00" : "#0055ff");
+        ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, Math.PI*2); ctx.fill();
         if(Math.hypot(p.x - shipPos.x, p.y - shipPos.y) < 35) {
-            if(p.t === 's') { sideShips = Math.min(2, sideShips + 1); powerUpStack.push('s'); } 
-            else if(p.t === 'f') { fireDelay = Math.max(80, fireDelay - 40); powerUpStack.push('f'); }
-            else { defenseUp++; }
+            if(p.t === 's' && sideShips < 2) { sideShips++; powerUpStack.push('s'); }
+            if(p.t === 'f' && fireDelay > 100) { fireDelay -= 40; powerUpStack.push('f'); }
+            if(p.t === 'd') { defenseUp = 1; setTimeout(() => defenseUp = 0, 10000); }
             powerups.splice(i, 1);
         }
     });
 
-    if(gameActive) requestAnimationFrame(update);
+    requestAnimationFrame(update);
 }
 
-function updateScore() { document.getElementById('val').innerText = score; }
-function updateHUD() { 
-    const fill = document.getElementById('hp-fill'), lVal = document.getElementById('lives-val');
-    if(fill) fill.style.width = Math.max(0, playerHP) + "%"; 
-    if(lVal) lVal.innerText = (5 - deaths);
-}
-
-function endGame(win) {
-    gameActive = false;
-    const s = document.createElement('div'); s.className = 'end-screen';
-    s.style.color = win ? "#00f2ff" : "#ff0055";
-    s.innerHTML = `<h1>${win ? 'MISSÃO CUMPRIDA' : 'NAVE ABATIDA'}</h1><p>SCORE: ${score}</p><button onclick="resetGame()" style="background:none; border:2px solid currentColor; color:currentColor; padding:15px 30px; cursor:pointer; margin-top:30px; font-family:'Syncopate'">REINICIAR</button>`;
-    document.body.appendChild(s);
-}
-
-init();
-btn.onclick = () => { startLoop(); };
-window.onresize = init;
+window.onload = init;
+btn.addEventListener('click', startLoop);
+window.addEventListener('resize', init);
